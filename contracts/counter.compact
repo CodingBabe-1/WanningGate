@@ -1,0 +1,112 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  WanningGate — Claim Gate Counter
+//  Midnight Level 1 reference contract
+// ═══════════════════════════════════════════════════════════════════════════
+//
+//  PURPOSE
+//  -------
+//  A membership gate that counts successful claims in public, while never
+//  revealing *who* claimed. This is the Level 1 seed of the WanningGate idea:
+//  a private allowlist access module where the issuer can audit that N claims
+//  happened, and detect double-claims, without learning any member's identity.
+//
+//  ── WHAT IS PUBLIC (on-chain, visible to anyone) ──────────────────────────
+//
+//    claimCount      The running total of accepted claims. Public and
+//                    deliberately so — the issuer's audit trail is "N members
+//                    have entered".
+//
+//    lastClaimTag    A one-way commitment (persistentHash) of the most recent
+//                    claimant's secret. It is a *tag*, not an identity: it
+//                    cannot be reversed to the secret, but the same secret
+//                    always produces the same tag, so a repeated claim by the
+//                    same secret is observable. That is the double-claim
+//                    detector.
+//
+//    gateOpen        Whether the gate currently accepts claims. Public admin
+//                    state so anyone can see if the allowlist is accepting.
+//
+//  ── WHAT IS PRIVATE (private witness, never on-chain) ─────────────────────
+//
+//    memberSecret()  The caller's allowlist secret, supplied as a circuit
+//                    witness. It lives only in the caller's private state and
+//                    inside the zero-knowledge proof. It is NEVER written to
+//                    the ledger, never put in a transaction, and never
+//                    observable by the node, the indexer, or any other party.
+//
+//  ── WHAT THE USER PROVES WITHOUT REVEALING ────────────────────────────────
+//
+//    The caller proves: "I know a secret that hashes to this tag, and the gate
+//    is open." The proof demonstrates knowledge of the secret without
+//    disclosing it. Only the derived tag is disclosed, and only because the
+//    double-claim audit requires a stable per-member fingerprint.
+//
+//    disclose() is therefore used EXACTLY ONCE and DELIBERATELY, on the tag
+//    only — never on `secret` itself.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// ─── PUBLIC LEDGER STATE ───────────────────────────────────────────────────
+
+/** Running total of accepted claims. Public audit trail. */
+export ledger claimCount: Counter;
+
+/** Commitment (persistentHash) of the most recent claimant's secret. */
+export ledger lastClaimTag: Bytes<32>;
+
+/** Whether the gate currently accepts claims. */
+export ledger gateOpen: Boolean;
+
+// ─── PRIVATE WITNESS ───────────────────────────────────────────────────────
+//
+// Declared as a witness: its value comes from the caller's local private
+// state at proving time. The ledger never sees it.
+
+/** The caller's allowlist secret. Private — never disclosed. */
+witness memberSecret(): Bytes<32>;
+
+// ─── CIRCUITS ──────────────────────────────────────────────────────────────
+
+/**
+ * Open the gate so claims are accepted.
+ * Pure public-state transition; no private data involved.
+ */
+export circuit openGate(): [] {
+  gateOpen = true;
+}
+
+/**
+ * Close the gate so further claims are rejected.
+ * Pure public-state transition; no private data involved.
+ */
+export circuit closeGate(): [] {
+  gateOpen = false;
+}
+
+/**
+ * Claim membership.
+ *
+ * Reads the private witness `memberSecret()`, derives a one-way tag from it,
+ * increments the public claim counter, and records the tag publicly.
+ *
+ * The only value that crosses from private to public is the tag — the secret
+ * itself never leaves the witness, and the tag is disclosed explicitly so the
+ * privacy boundary is visible in the source.
+ */
+export circuit claim(): [] {
+  assert(gateOpen, "WanningGate: gate is closed");
+
+  const secret = memberSecret();
+  const tag = persistentHash<Bytes<32>>(secret);
+
+  claimCount.increment(1);
+
+  // The single, deliberate disclosure. `tag` is private-derived, so the
+  // compiler requires disclose() before it may enter public ledger state.
+  // `secret` is NOT disclosed.
+  lastClaimTag = disclose(tag);
+}
