@@ -1,0 +1,138 @@
+# Local Midnight devnet for WanningGate
+# LOCAL DEVELOPMENT ONLY — do not expose these ports to a public network.
+# Tear down with: docker compose down -v
+name: wanning-gate-devnet
+
+# Container DNS.
+#
+# In cloud dev environments (Codespaces, devcontainers, some CI runners) Docker
+# copies a host resolver into the container that is not reachable from inside
+# the container network namespace. Containers then resolve each other fine (via
+# Docker's embedded DNS) but fail on every external hostname. The proof server
+# needs external access at startup to fetch SRS parameters from
+# https://srs.midnight.network; without working DNS it retries three times and
+# exits 1. Pinning public resolvers fixes that and changes nothing on a normal
+# workstation, where these are reachable anyway.
+x-dns: &default-dns
+  - 8.8.8.8
+  - 1.1.1.1
+
+services:
+  node:
+    image: midnightntwrk/midnight-node:1.0.0
+    container_name: wanning-gate-node
+    dns: *default-dns
+    ports:
+      - "9944:9944"
+    environment:
+      CFG_PRESET: "dev"
+      SIDECHAIN_BLOCK_BENEFICIARY: "04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e"
+    # Healthy means "producing blocks", not just "HTTP up": the probe asks
+    # for the hash of block 1 and fails until it exists. This matters because
+    # indexer-standalone 4.3.x's SPO component exits 1 if it connects while
+    # the chain is still at genesis ("block number 1 not found") — and
+    # `docker compose up --wait` fails outright the moment a container dies,
+    # so the indexer must not start until block 1 exists (depends_on below).
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf -H 'Content-Type: application/json' -d '{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"chain_getBlockHash\",\"params\":[1]}' http://localhost:9944 | grep -q '\"result\":\"0x'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 20s
+
+  indexer:
+    # indexer-standalone 4.3.x ships an SPO (Cardano Stake Pool Operator)
+    # indexer whose config hard-requires a Blockfrost API key at boot — the
+    # process exits 1 without APP__INFRA__SPO_NODE__BLOCKFROST_ID (verified
+    # against 4.3.3 on 2026-07-15). A dummy value satisfies the config loader
+    # on a local devnet (upstream example-hello-world ships the same dummy),
+    # so no real Blockfrost credential is needed for zero-config local dev.
+    # Do NOT bump to 4.3.4/4.4.0: those tags are pre-alpha integration builds
+    # for the future ledger-9/node-2 line, not stable releases.
+    image: midnightntwrk/indexer-standalone:4.3.3
+    container_name: wanning-gate-indexer
+    dns: *default-dns
+    # The node healthcheck above guarantees block 1 exists before this
+    # container starts (see comment there). restart: on-failure is kept as a
+    # second layer for plain `docker compose up -d` flows without --wait.
+    restart: on-failure
+    ports:
+      - "8088:8088"
+    environment:
+      RUST_LOG: "indexer=info,chain_indexer=info,indexer_api=info,wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "undeployed"
+      APP__INFRA__NODE__URL: "ws://node:9944"
+      APP__INFRA__STORAGE__PASSWORD: "indexer"
+      APP__INFRA__PUB_SUB__PASSWORD: "indexer"
+      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: "indexer"
+      APP__INFRA__SECRET: "303132333435363738393031323334353637383930313233343536373839303132"
+      APP__INFRA__SPO_NODE__URL: "ws://node:9944"
+      APP__INFRA__SPO_NODE__BLOCKFROST_ID: "local-devnet-dummy-id"
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/indexer-standalone/running"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    depends_on:
+      node:
+        condition: service_healthy
+
+  proof-server:
+    # The proof-server image is distroless (nix-built): /bin/sh exists but is
+    # not on PATH and there is no curl/wget. The healthcheck below works
+    # because CMD-SHELL invokes /bin/sh directly and the probe uses the
+    # shell-builtin /dev/tcp redirect (verified on 8.1.0, 2026-07-15) — so
+    # `docker compose up -d --wait` now gates on the proof-server actually
+    # listening. The deploy script additionally polls it from the host side
+    # before submitting transactions (see waitForProofServer in src/deploy.ts).
+    # Pinned to 8.1.0 (matches the ledger-v8 8.1.0 that Midnight.js 4.1.1
+    # pins client-side). Never bump downward into the 7.x line: proof-server
+    # 7.x (all patches tested: 7.0.0 through 7.0.3) hangs in proof generation
+    # on Apple Silicon Macs running Docker Desktop — the actix worker thread
+    # spins at 100% CPU forever after receiving /prove, with no log output.
+    # Avoid 9.0.0-rc.x tags: pre-release.
+    image: midnightntwrk/proof-server:8.1.0
+    container_name: wanning-gate-proof-server
+    # Host networking. This is the only service that needs outbound internet: it
+    # downloads SRS parameters from https://srs.midnight.network at startup and
+    # exits 1 if it cannot reach them. User-defined bridge networks have no
+    # working egress in this environment — verified by raw-IP connections timing
+    # out and the nftables masquerade rule for 172.18.0.0/16 sitting at zero
+    # packets — so the container shares the host's network stack instead. It
+    # then binds 6300 directly on the host, which is exactly where the deploy
+    # script looks for it (src/network.ts → proofServer: http://127.0.0.1:6300).
+    #
+    # On a workstation where bridge networking does have egress, drop this line
+    # and use the normal form instead:
+    #     dns: *default-dns
+    #     ports:
+    #       - "6300:6300"
+    network_mode: host
+    command: ["midnight-proof-server -v"]
+    environment:
+      RUST_BACKTRACE: "full"
+    healthcheck:
+      test: ["CMD-SHELL", "echo > /dev/tcp/127.0.0.1/6300"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      # Docker normally masquerades outbound traffic from user-defined bridge
+      # networks, but in some containerised/cloud dev environments the network
+      # is created without that option, leaving containers with no internet
+      # access at all: service-to-service DNS still works, but every external
+      # connection times out. The proof server fetches SRS parameters from
+      # https://srs.midnight.network at startup and exits 1 if it cannot, so
+      # enable masquerading explicitly. This is the default on a normal
+      # workstation — stating it here changes nothing there.
+      com.docker.network.bridge.enable_ip_masquerade: "true"
