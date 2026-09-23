@@ -15,6 +15,27 @@
 > (gitignored) and printed by `npm run deploy`. The public-network addresses
 > above are filled in once the wallet has been funded from the matching faucet.
 
+## Wallet Addresses to Fund
+
+Neither public testnet will accept a deploy until the deploy wallet holds
+`tNIGHT`, so the addresses below need funding from the matching faucet first:
+
+| Network     | Deployer wallet address                                                        | Faucet                                            |
+| ----------- | ------------------------------------------------------------------------------ | ------------------------------------------------- |
+| **Preview** | `mn_addr_preview1k0z7xrtt0hmgpdpavxye9lp4ztsz98qyz5tglak2jzzz5wuk0gwsv5wma4`  | <https://midnight-tmnight-preview.nethermind.dev> |
+| **Preprod** | `mn_addr_preprod1wdtagartvyjdrdfgfv4cs05vptj7as0r9l9wlrjaq24l7ttv3qgq7ve4d2`  | <https://midnight-tmnight-preprod.nethermind.dev> |
+
+After funding, deploy against the matching network:
+
+```bash
+npm run deploy -- --network preview
+npm run deploy -- --network preprod
+```
+
+These are public bech32 addresses and are safe to share. The wallets' BIP-39
+recovery phrases are **not** published here — they stay in the gitignored
+`.midnight-state.json` on the machine that ran the deploy.
+
 ## What This Does
 
 WanningGate is the Level 1 seed of a private access-control module. A gate
