@@ -6,9 +6,9 @@
 
 ## Contract Address
 
-| Network  | Address                                                                   |
-| -------- | ------------------------------------------------------------------------- |
-| Preview  | `[PASTE PREVIEW ADDRESS AFTER DEPLOY]`                                     |
+| Network  | Address                                                                    |
+| -------- | -------------------------------------------------------------------------- |
+| Preview  | `94971f61fe1f9dc870c9d6cfdee2bfd060f48b5a9b6350cc2157b55090dea777`          |
 | Preprod  | `[PASTE PREPROD ADDRESS AFTER DEPLOY]`                                     |
 
 > Local `undeployed` devnet deploy address is written to `.midnight-state.json`
@@ -18,7 +18,9 @@
 ## Wallet Addresses to Fund
 
 Neither public testnet will accept a deploy until the deploy wallet holds
-`tNIGHT`, so the addresses below need funding from the matching faucet first:
+`tNIGHT`, so each address below must be funded from its faucet before that
+network's first deploy. Preview is funded and deployed; Preprod is still
+awaiting its first top-up:
 
 | Network     | Deployer wallet address                                                        | Faucet                                            |
 | ----------- | ------------------------------------------------------------------------------ | ------------------------------------------------- |

@@ -53,6 +53,10 @@ coverage/
 # Private state
 *-state/
 
+# Midnight.js level private-state store, written by deploy/cli/e2e-check next to
+# the working directory. Holds the encrypted claim-secret witness — never commit it.
+midnight-level-db/
+
 # Temporary files
 tmp/
 temp/
