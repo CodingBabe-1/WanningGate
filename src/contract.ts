@@ -16,7 +16,15 @@ import { witnesses, type CounterWitnesses } from './witnesses';
 
 /**
  * Identifier under which this contract's private state is stored. Must be
- * identical at deploy time and on every later reconnect.
+ * identical at deploy time and on every later reconnect — a mismatch silently
+ * orphans the witness secret, so every interaction after a reconnect would
+ * prove with an empty or wrong `claimSecret`.
+ *
+ * @example
+ * ```ts
+ * // In deploy.ts and cli.ts, always reference this constant:
+ * levelPrivateStateProvider({ privateStateStoreName: PRIVATE_STATE_ID, ... })
+ * ```
  */
 export const PRIVATE_STATE_ID = 'wanningGatePrivateState';
 
